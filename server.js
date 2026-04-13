@@ -329,6 +329,7 @@ app.post('/api/cvs/collab', upload.single('document'), async (req, res) => {
       senderEmail,
       targetEmail,
       cvId: cv._id,
+      sourceInstitutionId, // Explicitly store origin
       description: description || 'Por favor revisa este CV.',
       dueDate: finalDueDate
     });
@@ -447,8 +448,11 @@ app.get('/api/tasks', async (req, res) => {
   const { email } = req.query;
   const q = email ? { $or: [{ targetEmail: email }, { senderEmail: email }] } : {};
   const tasks = await Task.find(q)
-    .populate({ path: 'cvId', populate: { path: 'targetVacancyId' } })
-    .populate('targetVacancyId')
+    .populate({ 
+      path: 'cvId', 
+      populate: { path: 'targetVacancyId', populate: { path: 'institutionId' } } 
+    })
+    .populate({ path: 'targetVacancyId', populate: { path: 'institutionId' } })
     .sort({ createdAt: -1 });
   res.json(tasks.map(t => ({ ...t.toObject(), id: t._id, fine: t.fine })));
 });
@@ -517,6 +521,7 @@ app.post('/api/tasks/:id/fulfill-cv', upload.single('document'), async (req, res
       senderEmail: senderEmail || 'sistema@talent.com',
       targetEmail: targetEmail || 'admin@system.com',
       cvId: cv._id,
+      sourceInstitutionId, // Store source
       targetVacancyId: task.targetVacancyId,
       description: 'Institución envío cv',
       dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
@@ -567,6 +572,10 @@ app.delete('/api/contacts/:id', async (req, res) => {
     if (!contact) return res.status(404).json({ error: 'Contacto no encontrado' });
     res.json({ message: 'Contacto eliminado' });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/', (req, res) => {
+  res.send('Servidor de TalentCollab funcionando correctamente 🚀');
 });
 
 const PORT = process.env.PORT || 5000;
