@@ -91,9 +91,11 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    console.log(`[LOGIN ATTEMPT] Email: ${email}`);
     const dbUser = await User.findOne({ email }).populate('institutionId');
     if (dbUser) {
       if (await dbUser.comparePassword(password)) {
+        console.log(`[LOGIN SUCCESS] Found in DB: ${email}`);
         return res.json({
           token: 'jwt-' + dbUser._id,
           user: {
@@ -110,11 +112,16 @@ app.post('/api/auth/login', async (req, res) => {
     }
     const user = MOCK_USERS.find(u => u.email === email && u.password === password);
     if (user) {
+      console.log(`[LOGIN SUCCESS] Found in Mock Users: ${email}`);
       const { password: _, ...safeUser } = user;
       return res.json({ token: 'mock-token', user: safeUser });
     }
+    console.log(`[LOGIN FAILED] Credentials not found: ${email}`);
     res.status(401).json({ error: 'Credenciales inválidas' });
-  } catch (err) { res.status(500).json({ error: 'Error de servidor' }); }
+  } catch (err) { 
+    console.error('[LOGIN ERROR DETAILS]:', err);
+    res.status(500).json({ error: 'Error de servidor' }); 
+  }
 });
 
 app.get('/api/metrics', async (req, res) => {
@@ -215,6 +222,47 @@ app.post('/api/institutions', upload.single('logo'), async (req, res) => {
     const inst = await Institution.create({ _id, name, profile, logo: logoStr });
     res.status(201).json(inst);
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/institutions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`[DELETE INSTITUTION ATTEMPT] ID: ${id}`);
+    const inst = await Institution.findById(id);
+    if (!inst) {
+      console.log(`[DELETE FAILED] Institution not found: ${id}`);
+      return res.status(404).json({ error: 'Institución no encontrada' });
+    }
+
+    // CASCADE DELETE:
+    console.log(`[DELETE STEP 1] Cleaning Users for: ${id}`);
+    await User.deleteMany({ institutionId: id });
+    console.log(`[DELETE STEP 2] Cleaning Vacancies for: ${id}`);
+    await Vacancy.deleteMany({ institutionId: id });
+    console.log(`[DELETE STEP 3] Cleaning CVs for: ${id}`);
+    await mongoose.model('CV').deleteMany({ sourceInstitutionId: id });
+    
+    // 4. Logo File (Optional but recommended)
+    if (inst.logo) {
+      console.log(`[DELETE STEP 4] Removing Logo: ${inst.logo}`);
+      const logoPath = path.join(__dirname, 'uploads', inst.logo);
+      if (fs.existsSync(logoPath)) {
+        try { fs.unlinkSync(logoPath); } catch(e) {} 
+      }
+    }
+
+    const result = await mongoose.connection.db.collection('institutions').deleteOne({ _id: id });
+    console.log(`[DELETE SUCCESS] Deleted count for ${id}: ${result.deletedCount}`);
+    
+    if (result.deletedCount === 0) {
+      console.log(`[DELETE WARNING] Document not found via direct collection delete: ${id}`);
+    }
+
+    res.json({ message: 'Institución y todos sus datos asociados fueron eliminados correctamente.' });
+  } catch (e) { 
+    console.error('[DELETE ERROR DETAILS]:', e);
+    res.status(500).json({ error: e.message }); 
+  }
 });
 
 app.get('/api/vacancies', async (req, res) => {
